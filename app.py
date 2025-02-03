@@ -2,11 +2,12 @@ import streamlit as st
 from dotenv import load_dotenv
 import google.generativeai as genai
 import os
-from youtube_transcript_api import YouTubeTranscriptApi, _errors
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
 from googletrans import Translator
 import re
+import urllib.parse
 
-load_dotenv()  # Load all environment variables
+load_dotenv()  # Load environment variables
 
 # Set up Google Gemini API
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -14,32 +15,43 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 # Translator setup
 translator = Translator()
 
-# Define the prompt for summarization
-prompt = """You are a YouTube video summarizer. You will be taking the transcript text and summarizing the entire video, providing the important points within 250 words. The transcript text will be appended here: """
+# Define summarization prompt
+prompt = """Summarize the given YouTube transcript into key points within 250 words: """
 
-# Function to extract transcript from YouTube video
+# Function to extract video ID from different YouTube URL formats
+def extract_video_id(url):
+    try:
+        parsed_url = urllib.parse.urlparse(url)
+        if parsed_url.netloc in ["www.youtube.com", "youtube.com"]:
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            return query_params.get("v", [None])[0]
+        elif parsed_url.netloc == "youtu.be":
+            return parsed_url.path.lstrip("/")
+        elif "embed" in parsed_url.path:
+            return parsed_url.path.split("/")[-1]
+        return None
+    except Exception:
+        return None
+
+# Function to extract transcript
 def extract_transcript_details(youtube_video_url):
     try:
-        # Extract video ID using regular expression to handle multiple URL formats
-        video_id_match = re.search(r"(?<=v=)[a-zA-Z0-9_-]{11}", youtube_video_url)
-        if not video_id_match:
-            raise ValueError("Invalid YouTube URL")
-        video_id = video_id_match.group(0)
+        video_id = extract_video_id(youtube_video_url)
+        if not video_id:
+            st.error("Invalid YouTube URL format.")
+            return None
         
-        # Get transcript for the video
         transcript_text = YouTubeTranscriptApi.get_transcript(video_id)
-        transcript = ""
-        for entry in transcript_text:
-            transcript += " " + entry["text"]
+        transcript = " ".join([entry["text"] for entry in transcript_text])
         return transcript
-    except _errors.TranscriptsDisabled:
+    except TranscriptsDisabled:
         st.error("Transcripts are disabled for this video.")
     except Exception as e:
         st.error(f"An error occurred: {e}")
     return None
 
 # Function to generate summary using Google Gemini
-def generate_gemini_content(transcript_text, prompt):
+def generate_gemini_content(transcript_text):
     try:
         model = genai.GenerativeModel("gemini-pro")
         response = model.generate_content(prompt + transcript_text)
@@ -48,7 +60,7 @@ def generate_gemini_content(transcript_text, prompt):
         st.error(f"Error generating summary: {e}")
         return None
 
-# Function to translate summary to the desired language
+# Function to translate summary
 def translate_summary(summary, language):
     try:
         translated = translator.translate(summary, dest=language)
@@ -57,31 +69,29 @@ def translate_summary(summary, language):
         st.error(f"Error translating summary: {e}")
         return summary
 
-# Streamlit App Interface
-st.markdown("<h1 style='color:red;'>YouTube Transcript to Detailed Notes Converter</h1>", unsafe_allow_html=True)
+# Streamlit UI
+st.markdown("<h1 style='color:red;'>YouTube Transcript Summarizer & Translator</h1>", unsafe_allow_html=True)
+
 youtube_link = st.text_input("Enter YouTube Video Link:")
 
-# Display thumbnail image for YouTube video
-if youtube_link:
-    video_id = youtube_link.split("=")[1]
+# Display thumbnail if URL is valid
+video_id = extract_video_id(youtube_link)
+if video_id:
     st.image(f"http://img.youtube.com/vi/{video_id}/0.jpg", use_container_width=True)
 
-# Dropdown to select language for translation
-language_choice = st.selectbox(
-    "Choose Language for Summary:",
+# Language selection
+language_choice = st.selectbox("Choose Language for Summary:", 
     ["English", "Spanish", "French", "German", "Italian", "Portuguese", "Russian", "Japanese", "Chinese", "Hindi", "Telugu", "Kannada", "Tamil"]
-
 )
 
-# Button to generate detailed notes
+# Button to generate summary
 if st.button("Get Detailed Notes"):
     transcript_text = extract_transcript_details(youtube_link)
 
     if transcript_text:
-        summary = generate_gemini_content(transcript_text, prompt)
+        summary = generate_gemini_content(transcript_text)
 
         if summary:
-            # Translate the summary to the chosen language
             translated_summary = translate_summary(summary, language_choice)
             st.markdown("## Detailed Notes:")
             st.write(translated_summary)
