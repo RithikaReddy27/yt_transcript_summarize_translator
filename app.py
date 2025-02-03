@@ -2,8 +2,9 @@ import streamlit as st
 from dotenv import load_dotenv
 import google.generativeai as genai
 import os
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, _errors
 from googletrans import Translator
+import re
 
 load_dotenv()  # Load all environment variables
 
@@ -19,25 +20,42 @@ prompt = """You are a YouTube video summarizer. You will be taking the transcrip
 # Function to extract transcript from YouTube video
 def extract_transcript_details(youtube_video_url):
     try:
-        video_id = youtube_video_url.split("=")[1]
+        # Extract video ID using regular expression to handle multiple URL formats
+        video_id_match = re.search(r"(?<=v=)[a-zA-Z0-9_-]{11}", youtube_video_url)
+        if not video_id_match:
+            raise ValueError("Invalid YouTube URL")
+        video_id = video_id_match.group(0)
+        
+        # Get transcript for the video
         transcript_text = YouTubeTranscriptApi.get_transcript(video_id)
         transcript = ""
-        for i in transcript_text:
-            transcript += " " + i["text"]
+        for entry in transcript_text:
+            transcript += " " + entry["text"]
         return transcript
+    except _errors.TranscriptsDisabled:
+        st.error("Transcripts are disabled for this video.")
     except Exception as e:
-        raise e
+        st.error(f"An error occurred: {e}")
+    return None
 
 # Function to generate summary using Google Gemini
 def generate_gemini_content(transcript_text, prompt):
-    model = genai.GenerativeModel("gemini-pro")
-    response = model.generate_content(prompt + transcript_text)
-    return response.text
+    try:
+        model = genai.GenerativeModel("gemini-pro")
+        response = model.generate_content(prompt + transcript_text)
+        return response.text
+    except Exception as e:
+        st.error(f"Error generating summary: {e}")
+        return None
 
 # Function to translate summary to the desired language
 def translate_summary(summary, language):
-    translated = translator.translate(summary, dest=language)
-    return translated.text
+    try:
+        translated = translator.translate(summary, dest=language)
+        return translated.text
+    except Exception as e:
+        st.error(f"Error translating summary: {e}")
+        return summary
 
 # Streamlit App Interface
 st.markdown("<h1 style='color:red;'>YouTube Transcript to Detailed Notes Converter</h1>", unsafe_allow_html=True)
@@ -51,7 +69,7 @@ if youtube_link:
 # Dropdown to select language for translation
 language_choice = st.selectbox(
     "Choose Language for Summary:",
-    ["English", "Spanish", "French", "German", "Italian", "Portuguese", "Russian", "Japanese", "Chinese", "Hindi", "Telugu", "Kannada", "Tamil"]
+    ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "zh", "hi", "te", "kn", "ta"]
 )
 
 # Button to generate detailed notes
@@ -61,8 +79,8 @@ if st.button("Get Detailed Notes"):
     if transcript_text:
         summary = generate_gemini_content(transcript_text, prompt)
 
-        # Translate the summary to the chosen language
-        translated_summary = translate_summary(summary, language_choice)
-        st.markdown("## Detailed Notes:")
-
-        st.write(translated_summary)
+        if summary:
+            # Translate the summary to the chosen language
+            translated_summary = translate_summary(summary, language_choice)
+            st.markdown("## Detailed Notes:")
+            st.write(translated_summary)
