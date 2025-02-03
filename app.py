@@ -69,7 +69,8 @@ if youtube_link:
 # Dropdown to select language for translation
 language_choice = st.selectbox(
     "Choose Language for Summary:",
-    ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "zh", "hi", "te", "kn", "ta"]
+    ["English", "Spanish", "French", "German", "Italian", "Portuguese", "Russian", "Japanese", "Chinese", "Hindi", "Telugu", "Kannada", "Tamil"]
+
 )
 
 # Button to generate detailed notes
